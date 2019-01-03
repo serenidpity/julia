@@ -142,7 +142,7 @@ function get_task_tls(t::Task)
     if t.storage === nothing
         t.storage = IdDict()
     end
-    (t.storage)::IdDict{Any,Any}
+    return (t.storage)::IdDict{Any,Any}
 end
 
 """
@@ -168,12 +168,13 @@ for emulating dynamic scoping.
 """
 function task_local_storage(body::Function, key, val)
     tls = task_local_storage()
-    hadkey = haskey(tls,key)
-    old = get(tls,key,nothing)
+    hadkey = haskey(tls, key)
+    old = get(tls, key, nothing)
     tls[key] = val
-    try body()
+    try
+        return body()
     finally
-        hadkey ? (tls[key] = old) : delete!(tls,key)
+        hadkey ? (tls[key] = old) : delete!(tls, key)
     end
 end
 
@@ -200,7 +201,7 @@ exception, the exception is propagated (re-thrown in the task that called fetch)
 """
 function fetch(t::Task)
     wait(t)
-    task_result(t)
+    return task_result(t)
 end
 
 
@@ -264,6 +265,7 @@ macro async(expr)
             push!($var, task)
         end
         schedule(task)
+        task
     end
 end
 
@@ -358,7 +360,7 @@ end
 
 ## scheduler and work queue
 
-global const Workqueue = Task[]
+global const Workqueue = InvasiveLinkedList{Task}()
 
 function enq_work(t::Task)
     t.state == :runnable || error("schedule: Task not runnable")
@@ -494,8 +496,7 @@ function ensure_rescheduled(othertask::Task)
         # if the current task was queued,
         # also need to return it to the runnable state
         # before throwing an error
-        i = findfirst(t->t===ct, Workqueue)
-        i === nothing || deleteat!(Workqueue, i)
+        list_deletefirst!(Workqueue, ct)
         ct.state = :runnable
     end
     nothing
