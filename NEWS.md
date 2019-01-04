@@ -4,8 +4,8 @@ Julia v1.2 Release Notes
 New language features
 ---------------------
 
-* The `extrema` function now accepts a function argument in the same manner as `minimum` and
-  `maximum` ([#30323]).
+  * Argument splatting (`x...`) can now be used in calls to the `new` pseudo-function in
+    constructors ([#30577]).
 
 Multi-threading changes
 -----------------------
@@ -24,23 +24,25 @@ Command-line option changes
 New library functions
 ---------------------
 
-* `getipaddrs()` function returns all the IP addresses of the local machine ([#30349])
+  * `getipaddrs()` function returns all the IP addresses of the local machine ([#30349])
 
 Standard library changes
 ------------------------
 
+  * The `extrema` function now accepts a function argument in the same manner as `minimum` and
+    `maximum` ([#30323]).
 
 #### LinearAlgebra
 
-* Added keyword arguments `rtol`, `atol` to `pinv` and `nullspace` ([#29998]).
+  * Added keyword arguments `rtol`, `atol` to `pinv` and `nullspace` ([#29998]).
 
 #### SparseArrays
 
-* performance improvements for sparse matrix-matrix multiplication ([#30372]).
+  * performance improvements for sparse matrix-matrix multiplication ([#30372]).
 
 #### Dates
 
-* Fixed `repr` such that it displays `DateTime` as it would be entered in Julia ([#30200]).
+  * Fixed `repr` such that it displays `DateTime` as it would be entered in Julia ([#30200]).
 
 
 External dependencies
