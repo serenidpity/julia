@@ -138,6 +138,7 @@ static void restore_stack2(jl_ptls_t ptls, jl_task_t *lastt)
 #endif
 
 static jl_function_t *task_done_hook_func = NULL;
+void jl_task_done_hook_partr(jl_task_t *task);
 
 static void JL_NORETURN finish_task(jl_task_t *t, jl_value_t *resultval JL_MAYBE_UNROOTED)
 {
@@ -155,15 +156,8 @@ static void JL_NORETURN finish_task(jl_task_t *t, jl_value_t *resultval JL_MAYBE
     ptls->in_finalizer = 0;
     ptls->in_pure_callback = 0;
     jl_get_ptls_states()->world_age = jl_world_counter;
-    if (ptls->tid != 0) {
-        // For now, only thread 0 runs the task scheduler.
-        // The others return to the thread loop
-        ptls->root_task->result = jl_nothing;
-        jl_task_t *task = ptls->root_task;
-        jl_switchto(&task);
-        gc_debug_critical_error();
-        abort();
-    }
+    // let the runtime know this task is dead and find a new task to run
+    jl_task_done_hook_partr(t);
     if (task_done_hook_func == NULL) {
         task_done_hook_func = (jl_function_t*)jl_get_global(jl_base_module,
                                                             jl_symbol("task_done_hook"));
@@ -276,6 +270,7 @@ static void ctx_switch(jl_ptls_t ptls, jl_task_t **pt)
         if (lastt->copy_stack) { // save the old copy-stack
             save_stack(ptls, lastt, pt); // allocates (gc-safepoint, and can also fail)
             if (jl_setjmp(lastt->ctx.uc_mcontext, 0)) {
+                // TODO: mutex unlock the thread we just switched from
 #ifdef ENABLE_TIMINGS
                 assert(blk == ptls->current_task->timing_stack);
                 if (blk)
@@ -296,6 +291,10 @@ static void ctx_switch(jl_ptls_t ptls, jl_task_t **pt)
     ptls->world_age = t->world_age;
     t->gcstack = NULL;
     ptls->current_task = t;
+    if (!lastt->sticky)
+        // release lastt to run on any tid
+        lastt->tid = -1;
+    t->tid = ptls->tid;
 
     jl_ucontext_t *lastt_ctx = (killed ? NULL : &lastt->ctx);
 #ifdef COPY_STACKS
@@ -326,6 +325,7 @@ static void ctx_switch(jl_ptls_t ptls, jl_task_t **pt)
     else {
         jl_start_fiber(lastt_ctx, &t->ctx);
     }
+    // TODO: mutex unlock the thread we just switched from
 #ifdef ENABLE_TIMINGS
     assert(blk == ptls->current_task->timing_stack);
     if (blk)
@@ -490,10 +490,12 @@ JL_DLLEXPORT jl_task_t *jl_new_task(jl_function_t *start, jl_value_t *completion
     t->eh = NULL;
     // TODO: allow non-sticky tasks
     t->tid = ptls->tid;
+    t->sticky = 1;
     t->gcstack = NULL;
     t->excstack = NULL;
     t->stkbuf = NULL;
     t->started = 0;
+    t->prio = -1;
 #ifdef ENABLE_TIMINGS
     t->timing_stack = NULL;
 #endif
@@ -922,6 +924,7 @@ void jl_init_root_task(void *stack_lo, void *stack_hi)
     ptls->current_task->gcstack = NULL;
     ptls->current_task->excstack = NULL;
     ptls->current_task->tid = ptls->tid;
+    ptls->current_task->sticky = 1;
 #ifdef JULIA_ENABLE_THREADING
     arraylist_new(&ptls->current_task->locks, 0);
 #endif

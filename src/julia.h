@@ -1595,8 +1595,8 @@ JL_DLLEXPORT void jl_sigatomic_end(void);
 
 // tasks and exceptions -------------------------------------------------------
 
-
 typedef struct _jl_timing_block_t jl_timing_block_t;
+
 // info describing an exception handler
 typedef struct _jl_handler_t {
     jl_jmp_buf eh_ctx;
@@ -1629,8 +1629,9 @@ typedef struct _jl_task_t {
     jl_ucontext_t ctx; // saved thread state
     void *stkbuf; // malloc'd memory (either copybuf or stack)
     size_t bufsz; // actual sizeof stkbuf
-    unsigned int copy_stack:31; // sizeof stack for copybuf
+    unsigned int copy_stack; // sizeof stack for copybuf
     unsigned int started:1;
+    unsigned int sticky:1;
 
     // current exception handler
     jl_handler_t *eh;
@@ -1644,6 +1645,8 @@ typedef struct _jl_task_t {
     // id of owning thread
     // does not need to be defined until the task runs
     int16_t tid;
+    /* for the multiqueue */
+    int16_t prio;
 #ifdef JULIA_ENABLE_THREADING
     // This is statically initialized when the task is not holding any locks
     arraylist_t locks;
