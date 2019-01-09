@@ -1624,14 +1624,14 @@ typedef struct _jl_task_t {
     jl_value_t *backtrace;
     jl_value_t *logstate;
     jl_function_t *start;
+    uint8_t sticky; // record whether this Task can be migrated to a new thread
 
 // hidden state:
     jl_ucontext_t ctx; // saved thread state
     void *stkbuf; // malloc'd memory (either copybuf or stack)
     size_t bufsz; // actual sizeof stkbuf
-    unsigned int copy_stack; // sizeof stack for copybuf
+    unsigned int copy_stack:31; // sizeof stack for copybuf
     unsigned int started:1;
-    unsigned int sticky:1;
 
     // current exception handler
     jl_handler_t *eh;

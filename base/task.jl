@@ -2,7 +2,8 @@
 
 ## basic task functions and TLS
 
-Core.Task(@nospecialize(f), reserved_stack::Int=0) = Task(f, reserved_stack, GenericCondition{Threads.SpinLock}())
+const ThreadSyncronizer = GenericCondition{Threads.SpinLock}
+Core.Task(@nospecialize(f), reserved_stack::Int=0) = Task(f, reserved_stack, ThreadSyncronizer())
 
 # Container for a captured exception and its backtrace. Can be serialized.
 struct CapturedException <: Exception
@@ -293,7 +294,7 @@ function task_done_hook(t::Task)
     end
 
     donenotify = t.donenotify
-    if isa(donenotify, GenericCondition{Threads.SpinLock})
+    if isa(donenotify, ThreadSyncronizer)
         lock(donenotify)
         try
             if !isempty(donenotify.waitq)
@@ -441,12 +442,13 @@ end
 
 function enq_work(t::Task)
     (t.state == :runnable && t.queue === nothing) || error("schedule: Task not runnable")
-    tid = Threads.threadid(t)
+    tid = (t.sticky ? Threads.threadid(t) : 0)
     if tid == 0
-        tid = Threads.threadid()
+        ccall(:jl_enqueue_task, Cvoid, (Any,), t)
+    else
+        push!(Workqueues[tid], t)
     end
-    push!(Workqueues[tid], t)
-    tid == Threads.threadid() || ccall(:jl_wakeup_thread, Cvoid, (Int16,), (tid - 1) % Int16)
+    ccall(:jl_wakeup_thread, Cvoid, (Int16,), (tid - 1) % Int16)
     return t
 end
 
@@ -597,21 +599,23 @@ function trypoptask(W::StickyWorkqueue)
 end
 
 @noinline function poptaskref(W::StickyWorkqueue)
-    local task
-    while true
-        task = trypoptask(W)
-        task === nothing || break
-        if process_events(true) == 0
-            task = trypoptask(W)
-            task === nothing || break
-            # if there are no active handles and no runnable tasks, just
-            # wait for signals.
-            pause()
-        end
-    end
+    gettask = () -> trypoptask(W)
+    task = ccall(:jl_task_get_next, Any, (Any,), gettask)
+    ## Below is a reference implementation for `jl_task_get_next`, which currently lives in C
+    #local task
+    #while true
+    #    task = trypoptask(W)
+    #    task === nothing || break
+    #    if process_events(true) == 0
+    #        task = trypoptask(W)
+    #        task === nothing || break
+    #        # if there are no active handles and no runnable tasks, just
+    #        # wait for signals.
+    #        pause()
+    #    end
+    #end
     return Ref(task)
 end
-
 
 function wait()
     W = Workqueues[Threads.threadid()]
