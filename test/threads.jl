@@ -434,7 +434,11 @@ function test_thread_cfunction()
     end
     @test sum(ok) == 10000
 end
-test_thread_cfunction()
+if nthreads() == 1
+    test_thread_cfunction()
+else
+    @test_broken "cfunction trampoline code not thread-safe"
+end
 
 # Compare the two ways of checking if threading is enabled.
 # `jl_tls_states` should only be defined on non-threading build.

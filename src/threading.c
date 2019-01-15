@@ -413,14 +413,16 @@ void jl_init_threading(void)
         jl_n_threads = 1;
 
     // thread sleep threshold
-    jl_thread_sleep_threshold = DEFAULT_THREAD_SLEEP_THRESHOLD;
-    cp = getenv(THREAD_SLEEP_THRESHOLD_NAME);
-    if (cp) {
-        if (!strncasecmp(cp, "infinite", 8))
-            jl_thread_sleep_threshold = 0;
-        else
-            jl_thread_sleep_threshold = (uint64_t)strtol(cp, NULL, 10);
-    }
+    // TODO: This is buggy / racy
+    jl_thread_sleep_threshold = 0;
+    //jl_thread_sleep_threshold = DEFAULT_THREAD_SLEEP_THRESHOLD;
+    //cp = getenv(THREAD_SLEEP_THRESHOLD_NAME);
+    //if (cp) {
+    //    if (!strncasecmp(cp, "infinite", 8))
+    //        jl_thread_sleep_threshold = 0;
+    //    else
+    //        jl_thread_sleep_threshold = (uint64_t)strtol(cp, NULL, 10);
+    //}
 
     jl_all_tls_states = (jl_ptls_t*)calloc(jl_n_threads, sizeof(void*));
 
@@ -484,6 +486,8 @@ void jl_start_threads(void)
 
 #endif
 
+unsigned volatile _threadedregion; // HACK: prevent the root task from sleeping
+
 // simple fork/join mode code
 JL_DLLEXPORT void jl_threading_run(jl_value_t *func)
 {
@@ -502,6 +506,7 @@ JL_DLLEXPORT void jl_threading_run(jl_value_t *func)
     jl_value_t *wait_func = jl_get_global(jl_base_module, jl_symbol("wait"));
     jl_value_t *schd_func = jl_get_global(jl_base_module, jl_symbol("schedule"));
     // create and schedule all tasks
+    _threadedregion += 1;
     for (int i = 0; i < nthreads; i++) {
         jl_value_t *args2[2];
         args2[0] = (jl_value_t*)jl_task_type;
@@ -513,6 +518,18 @@ JL_DLLEXPORT void jl_threading_run(jl_value_t *func)
         args2[0] = schd_func;
         args2[1] = (jl_value_t*)t;
         jl_apply(args2, 2);
+        if (i == 1) {
+            // let threads know work is coming (optimistic)
+            uv_mutex_lock(&sleep_lock);
+            uv_cond_broadcast(&sleep_alarm);
+            uv_mutex_unlock(&sleep_lock);
+        }
+    }
+    if (nthreads > 2) {
+        // let threads know work is ready (guaranteed)
+        uv_mutex_lock(&sleep_lock);
+        uv_cond_broadcast(&sleep_alarm);
+        uv_mutex_unlock(&sleep_lock);
     }
     // join with all tasks
     for (int i = 0; i < nthreads; i++) {
@@ -520,6 +537,7 @@ JL_DLLEXPORT void jl_threading_run(jl_value_t *func)
         jl_value_t *args[2] = { wait_func, t };
         jl_apply(args, 2);
     }
+    _threadedregion -= 1;
     JL_GC_POP();
     jl_gc_unsafe_leave(ptls, gc_state);
 }

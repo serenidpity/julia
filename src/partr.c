@@ -50,8 +50,8 @@ static int16_t heap_p;
 static uint64_t cong_unbias;
 
 /* for thread sleeping */
-static uv_mutex_t sleep_lock;
-static uv_cond_t  sleep_alarm;
+uv_mutex_t sleep_lock;
+uv_cond_t  sleep_alarm;
 
 
 /*  multiq_init()
@@ -263,47 +263,60 @@ JL_DLLEXPORT jl_task_t *jl_task_get_next(jl_value_t *getsticky)
     jl_task_t *task = NULL;
     JL_GC_PUSH1(&task);
 
-    uint64_t spin_ns, spin_start = 0;
+    uint64_t spin_start = 0;
     while (!task) {
-        if (jl_thread_sleep_threshold) {
-            if (spin_start == 0) {
-                spin_start = uv_hrtime();
-                continue;
-            }
+        if (jl_thread_sleep_threshold && spin_start == 0) {
+            spin_start = uv_hrtime();
         }
 
+        jl_gc_safepoint();
         task = get_next_task(getsticky);
+        if (task)
+            break;
 
-        if (!task) {
-            if (ptls->tid == 0)
+        if (ptls->tid == 0) {
+            if (!_threadedregion) {
+                if (jl_run_once(jl_global_event_loop()) == 0) {
+#ifdef _OS_WINDOWS_
+                    Sleep(INFINITY);
+#else
+                    pause();
+#endif
+                }
+            }
+            else {
                 jl_process_events(jl_global_event_loop());
-            else
+            }
+        }
+        else {
+            int sleepnow = 0;
+            if (!_threadedregion) {
+                uv_mutex_lock(&sleep_lock);
+                if (!_threadedregion) {
+                    sleepnow = 1;
+                }
+                else {
+                    uv_mutex_unlock(&sleep_lock);
+                }
+            }
+            else {
                 jl_cpu_pause();
-
-            if (jl_thread_sleep_threshold) {
-                spin_ns = uv_hrtime() - spin_start;
-                if (spin_ns > jl_thread_sleep_threshold) {
+                if (jl_thread_sleep_threshold && (uv_hrtime() - spin_start > jl_thread_sleep_threshold)) {
                     uv_mutex_lock(&sleep_lock);
                     task = get_next_task(getsticky);
-                    if (!task) {
-                        // thread 0 makes a blocking call to the event loop
-                        if (ptls->tid == 0) {
-                            uv_mutex_unlock(&sleep_lock);
-                            jl_run_once(jl_global_event_loop());
-                        }
-                        // other threads just sleep
-                        else {
-                            int8_t gc_state = jl_gc_safe_enter(ptls);
-                            uv_cond_wait(&sleep_alarm, &sleep_lock);
-                            uv_mutex_unlock(&sleep_lock);
-                            jl_gc_safe_leave(ptls, gc_state);
-                        }
-                    }
-                    else {
+                    if (task) {
                         uv_mutex_unlock(&sleep_lock);
+                        break;
                     }
+                    sleepnow = 1;
                     spin_start = 0;
                 }
+            }
+            if (sleepnow) {
+                int8_t gc_state = jl_gc_safe_enter(ptls);
+                uv_cond_wait(&sleep_alarm, &sleep_lock);
+                uv_mutex_unlock(&sleep_lock);
+                jl_gc_safe_leave(ptls, gc_state);
             }
         }
     }
