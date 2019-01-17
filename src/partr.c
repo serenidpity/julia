@@ -277,8 +277,11 @@ JL_DLLEXPORT jl_task_t *jl_task_get_next(jl_value_t *getsticky)
         if (ptls->tid == 0) {
             if (!_threadedregion) {
                 if (jl_run_once(jl_global_event_loop()) == 0) {
+                    task = get_next_task(getsticky);
+                    if (task)
+                        break;
 #ifdef _OS_WINDOWS_
-                    Sleep(INFINITY);
+                    Sleep(INFINITE);
 #else
                     pause();
 #endif
