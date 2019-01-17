@@ -2,8 +2,8 @@
 
 ## basic task functions and TLS
 
-const ThreadSyncronizer = GenericCondition{Threads.SpinLock}
-Core.Task(@nospecialize(f), reserved_stack::Int=0) = Task(f, reserved_stack, ThreadSyncronizer())
+const ThreadSynchronizer = GenericCondition{Threads.SpinLock}
+Core.Task(@nospecialize(f), reserved_stack::Int=0) = Task(f, reserved_stack, ThreadSynchronizer())
 
 # Container for a captured exception and its backtrace. Can be serialized.
 struct CapturedException <: Exception
@@ -294,7 +294,7 @@ function task_done_hook(t::Task)
     end
 
     donenotify = t.donenotify
-    if isa(donenotify, ThreadSyncronizer)
+    if isa(donenotify, ThreadSynchronizer)
         lock(donenotify)
         try
             if !isempty(donenotify.waitq)
